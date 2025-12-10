@@ -66,37 +66,24 @@
             Sparkles, Video, Download, Play, Pause, Loader2, Upload, X, ImagePlus, 
             Zap, ScanEye, Copy, Type, ShoppingBag, TrendingUp, Mic, BarChart3, 
             User, Palette as PaletteIcon, Box, Smile, Plus, Trash2, Eye, Wand2, 
-            CheckCircle2, ClipboardPaste, Key, MinusCircle 
+            CheckCircle2, ClipboardPaste, Key, MinusCircle, AlertTriangle
         } from 'lucide-react';
 
         // --- ERROR BOUNDARY ---
         class ErrorBoundary extends Component {
             constructor(props) {
                 super(props);
-                this.state = { hasError: false, error: null, errorInfo: null };
+                this.state = { hasError: false, error: null };
             }
-
-            static getDerivedStateFromError(error) {
-                return { hasError: true, error };
-            }
-
-            componentDidCatch(error, errorInfo) {
-                console.error("React Error:", error, errorInfo);
-                this.setState({ errorInfo });
-            }
-
+            static getDerivedStateFromError(error) { return { hasError: true, error }; }
+            componentDidCatch(error, errorInfo) { console.error("React Error:", error, errorInfo); }
             render() {
                 if (this.state.hasError) {
                     return (
                         <div className="flex flex-col items-center justify-center h-screen bg-zinc-900 text-red-400 p-8 text-center">
-                            <h2 className="text-2xl font-bold mb-4">Terjadi Kesalahan Aplikasi</h2>
-                            <p className="mb-4 text-white">Jangan khawatir, ini detail errornya:</p>
-                            <div className="bg-black p-4 rounded text-left font-mono text-xs overflow-auto max-w-2xl border border-red-900">
-                                {this.state.error && this.state.error.toString()}
-                                <br/>
-                                {this.state.errorInfo && this.state.errorInfo.componentStack}
-                            </div>
-                            <button onClick={() => window.location.reload()} className="mt-6 px-6 py-3 bg-red-600 text-white rounded-full hover:bg-red-700">Refresh Halaman</button>
+                            <h2 className="text-xl font-bold mb-2">Terjadi Kesalahan</h2>
+                            <p className="text-sm mb-4">{this.state.error?.toString()}</p>
+                            <button onClick={() => window.location.reload()} className="px-4 py-2 bg-white text-black rounded-lg text-sm">Refresh</button>
                         </div>
                     );
                 }
@@ -133,7 +120,7 @@
 
         function TikTokAffiliateStudio() {
             // STATE
-            const [apiKey, setApiKey] = useState("AIzaSyDBnGH5LaL19SM0vAYol6brYr_LOVrqZ6w"); // API KEY BARU
+            const [apiKey, setApiKey] = useState(""); 
             const [showApiModal, setShowApiModal] = useState(false);
 
             const audioRef = useRef(null);
@@ -172,16 +159,17 @@
                 setTimeout(() => { if(loader) loader.style.display = 'none'; }, 500);
             }, []);
 
-            // Check API Key (Use hardcoded key if available)
+            // Check API Key on Load
             useEffect(() => {
-                if (!apiKey) {
-                    const storedKey = localStorage.getItem("gemini_api_key");
-                    if (storedKey) {
-                        setApiKey(storedKey);
-                        setShowApiModal(false);
-                    } else {
-                        setShowApiModal(true);
-                    }
+                const storedKey = localStorage.getItem("gemini_api_key");
+                // Use the hardcoded key if local storage is empty, for convenience
+                const defaultKey = "AIzaSyDBnGH5LaL19SM0vAYol6brYr_LOVrqZ6w";
+                
+                if (storedKey) {
+                    setApiKey(storedKey);
+                } else {
+                    setApiKey(defaultKey);
+                    localStorage.setItem("gemini_api_key", defaultKey);
                 }
             }, []);
 
@@ -190,8 +178,9 @@
                     setApiKey(key.trim());
                     localStorage.setItem("gemini_api_key", key.trim());
                     setShowApiModal(false);
+                    setError(null); // Clear error on new key
                 } else {
-                    alert("API Key tidak valid!");
+                    alert("API Key terlalu pendek!");
                 }
             };
 
@@ -224,6 +213,7 @@
             };
 
             const analyzeProduct = async (base64Image) => {
+                if(!apiKey) return;
                 setIsAnalyzingProduct(true);
                 try {
                     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
@@ -231,8 +221,13 @@
                         body: JSON.stringify({ contents: [{ parts: [{ text: "Analyze this product image briefly for sales prompt." }, { inlineData: { mimeType: "image/png", data: base64Image.split(',')[1] } }] }] })
                     });
                     const d = await res.json();
-                    if(d.candidates?.[0]?.content?.parts?.[0]?.text) setPrompt(d.candidates[0].content.parts[0].text.trim());
-                } catch (e) {} finally { setIsAnalyzingProduct(false); }
+                    if(d.error) {
+                        console.error("Analysis Error", d.error);
+                    } else if(d.candidates?.[0]?.content?.parts?.[0]?.text) {
+                        setPrompt(d.candidates[0].content.parts[0].text.trim());
+                    }
+                } catch (e) { console.log("Auto-analyze failed", e); } 
+                finally { setIsAnalyzingProduct(false); }
             };
 
             const processFile = (file, setFunction) => {
@@ -301,7 +296,7 @@
                     setGeneratedScript(script);
                 } catch (err) { 
                     console.error(err);
-                    setError("Gagal membuat script: " + err.message);
+                    setError("Gagal Script: " + err.message);
                 } finally { setIsGeneratingScript(false); }
             };
 
@@ -334,21 +329,27 @@
                         
                         const vars = [`Professional shot. ${inst}`, `Close-up. ${inst}`, `Lifestyle. ${inst}`, `Creative. ${inst}`];
                         const fetchOne = async (ins) => {
-                            const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [...contents.map(c=>({role:"user",parts:[c]})), {role:"user",parts:[{text:`${ins} ${affiliatePrompt}`}]}], generationConfig: { responseModalities: ["TEXT", "IMAGE"] } }) });
-                            const d = await r.json();
-                            if(d.error) return null;
-                            const b64 = d.candidates?.[0]?.content?.parts?.find(p=>p.inlineData)?.inlineData?.data;
-                            return b64 ? `data:image/png;base64,${b64}` : null;
+                            try {
+                                const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [...contents.map(c=>({role:"user",parts:[c]})), {role:"user",parts:[{text:`${ins} ${affiliatePrompt}`}]}], generationConfig: { responseModalities: ["TEXT", "IMAGE"] } }) });
+                                const d = await r.json();
+                                if(d.error) {
+                                    console.error("Gemini Error", d.error);
+                                    return null;
+                                }
+                                const b64 = d.candidates?.[0]?.content?.parts?.find(p=>p.inlineData)?.inlineData?.data;
+                                return b64 ? `data:image/png;base64,${b64}` : null;
+                            } catch(e) { console.error(e); return null; }
                         };
                         const res = await Promise.all(vars.map(v => fetchOne(v)));
                         newImages = res.filter(i => i !== null);
                     } else {
                         const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instances: [{ prompt: affiliatePrompt }], parameters: { sampleCount: 4, aspectRatio } }) });
                         const d = await r.json();
+                        if (d.error) throw new Error(d.error.message);
                         if (d.predictions) newImages = d.predictions.map(p => `data:image/png;base64,${p.bytesBase64Encoded}`);
                     }
                     if (newImages.length > 0) { setGeneratedBatch(newImages); setGeneratedImage(newImages[0]); if (!generatedScript) handleGenerateScript(); } 
-                    else throw new Error("Gagal generate. Periksa API Key.");
+                    else throw new Error("Gagal generate. API menolak permintaan atau Key salah.");
                 } catch (err) { setError(err.message || "Gagal generate gambar."); } finally { setIsGeneratingImg(false); }
             };
 
@@ -357,9 +358,10 @@
                 try {
                     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: "Upscale to 4K." }, { inlineData: { mimeType: "image/png", data: generatedImage.split(',')[1] } }] }], generationConfig: { responseModalities: ["TEXT", "IMAGE"] } }) });
                     const d = await res.json();
+                    if (d.error) throw new Error(d.error.message);
                     const b64 = d.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
                     if(b64) { const n = `data:image/png;base64,${b64}`; setGeneratedImage(n); setGeneratedBatch([n]); }
-                } catch(e) { setError("Upscale gagal."); } finally { setIsUpscaling(false); }
+                } catch(e) { setError("Upscale gagal: " + e.message); } finally { setIsUpscaling(false); }
             };
 
             const handleGenerateVideo = () => {
@@ -374,7 +376,6 @@
                 const link = document.createElement('a'); link.href = generatedImage; link.download = `tiktok_${Date.now()}.png`; document.body.appendChild(link); link.click(); document.body.removeChild(link);
             };
 
-            // RENDER UI
             return (
                 <div className="h-screen bg-black text-white font-sans flex flex-col relative overflow-hidden selection:bg-cyan-500/30">
                     <audio ref={audioRef} src={voiceUrl} onEnded={() => setIsAudioPlaying(false)} />
@@ -385,17 +386,21 @@
                             <div className="bg-zinc-900 border border-zinc-700 p-6 rounded-2xl max-w-md w-full shadow-2xl animate-in zoom-in">
                                 <div className="flex items-center gap-2 mb-4 text-[#00f2ea]">
                                     <Key className="w-6 h-6"/>
-                                    <h2 className="text-xl font-bold">Masukkan API Key</h2>
+                                    <h2 className="text-xl font-bold">Pengaturan API Key</h2>
                                 </div>
-                                <p className="text-sm text-zinc-400 mb-4">Untuk menggunakan fitur AI (Gratis), Anda perlu Google Gemini API Key.</p>
-                                <input id="apiInput" type="text" placeholder="Paste API Key (AIza...)" className="w-full bg-black border border-zinc-700 rounded-lg px-4 py-3 text-white mb-4 focus:border-[#00f2ea] outline-none"/>
+                                <p className="text-sm text-zinc-400 mb-4">API Key yang tersimpan mungkin tidak valid atau habis kuota. Silakan masukkan yang baru.</p>
+                                <input id="apiInput" type="text" placeholder="AIza..." className="w-full bg-black border border-zinc-700 rounded-lg px-4 py-3 text-white mb-4 focus:border-[#00f2ea] outline-none"/>
                                 <div className="flex gap-2">
                                     <button onClick={() => saveApiKey(document.getElementById('apiInput').value)} className="flex-1 bg-[#00f2ea] text-black font-bold py-3 rounded-lg hover:bg-[#00c2ff] transition-colors">Simpan & Lanjutkan</button>
-                                    <a href="https://aistudio.google.com/app/apikey" target="_blank" className="flex-1 border border-zinc-700 text-center py-3 rounded-lg hover:bg-zinc-800 text-zinc-300">Dapat Key Gratis</a>
                                 </div>
                             </div>
                         </div>
                     )}
+                    
+                    {/* KEY SETTINGS BUTTON (Top Left) */}
+                    <button onClick={() => setShowApiModal(true)} className="absolute top-4 left-4 z-50 p-2 bg-zinc-900/50 hover:bg-zinc-800 rounded-lg border border-zinc-700 text-zinc-400 hover:text-white transition-colors" title="Ganti API Key">
+                        <Key size={16}/>
+                    </button>
 
                     {/* BACKGROUND */}
                     <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
@@ -404,12 +409,12 @@
                     </div>
 
                     {/* TOPBAR */}
-                    <div className="absolute top-0 left-0 right-0 p-4 flex justify-between items-center z-30 bg-black/20 backdrop-blur-md border-b border-white/5">
-                        <div className="flex items-center gap-2">
+                    <div className="absolute top-0 left-0 right-0 p-4 flex justify-between items-center z-30 pointer-events-none">
+                        <div className="flex items-center gap-2 pointer-events-auto ml-12">
                             <div className="w-8 h-8 bg-gradient-to-br from-[#00f2ea] to-[#ff0050] rounded-lg flex items-center justify-center text-black shadow-[0_0_15px_rgba(0,242,234,0.5)]"><ShoppingBag size={20}/></div>
                             <h1 className="font-bold text-lg tracking-tight flex items-center gap-1">Affiliate AI <span className="text-[10px] bg-white text-black px-1.5 py-0.5 rounded font-bold">ULTIMATE</span></h1>
                         </div>
-                        <div className="flex bg-zinc-900/80 p-1 rounded-lg border border-zinc-800 gap-1 overflow-x-auto max-w-[50vw] custom-scrollbar">
+                        <div className="flex bg-zinc-900/80 p-1 rounded-lg border border-zinc-800 gap-1 overflow-x-auto max-w-[50vw] custom-scrollbar pointer-events-auto">
                             {aspectRatios.map(r => (
                                 <button key={r.id} onClick={() => setAspectRatio(r.id)} className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition-all ${aspectRatio === r.id ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>{r.icon} {r.id}</button>
                             ))}
@@ -500,7 +505,11 @@
                                                 <div className={`relative mt-2 animate-in slide-in-from-right-4 fade-in transition-all ${isDraggingRef ? 'scale-[1.02] ring-2 ring-[#ff0050]' : ''}`} onDragOver={(e) => handleDragOver(e, setIsDraggingRef)} onDragLeave={(e) => handleDragLeave(e, setIsDraggingRef)} onDrop={(e) => handleDrop(e, setIsDraggingRef, setRefImage)}>
                                                     <div className="absolute left-1/2 -top-3 -translate-x-1/2 z-10 bg-zinc-950 p-1 rounded-full border border-zinc-800 shadow-sm"><Plus size={12} className="text-zinc-500"/></div>
                                                     <label htmlFor="ref-upload" className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl transition-all cursor-pointer group bg-zinc-900 overflow-hidden ${isDraggingRef ? 'border-[#ff0050] bg-zinc-800' : 'border-zinc-700 hover:border-[#ff0050] hover:bg-zinc-900/50'}`}>
-                                                        {refImage ? <div className="w-full h-full p-2 flex items-center justify-center bg-black/40"><img src={refImage} className="w-full h-full object-contain pointer-events-none"/></div> : <div className="flex flex-col items-center pointer-events-none">{renderRefIcon(referenceType)}<span className="text-xs text-zinc-400 font-medium">{isDraggingRef ? 'Lepaskan Foto!' : `Upload ${referenceType}`}</span></div>}
+                                                        {refImage ? 
+                                                            <div className="w-full h-full p-2 flex items-center justify-center bg-black/40"><img src={refImage} className="w-full h-full object-contain pointer-events-none"/></div> 
+                                                            : 
+                                                            <div className="flex flex-col items-center pointer-events-none">{renderRefIcon(referenceType)}<span className="text-xs text-zinc-400 font-medium">{isDraggingRef ? 'Lepaskan Foto!' : `Upload ${referenceType}`}</span></div>
+                                                        }
                                                     </label>
                                                     <input id="ref-upload" type="file" className="hidden" accept="image/*" onChange={handleRefUpload} />
                                                     {refImage && <button onClick={() => setRefImage(null)} className="absolute top-2 right-2 bg-black/60 hover:bg-red-500/90 backdrop-blur-md rounded-full p-1.5 text-white transition-colors z-10 border border-white/10"><Trash2 size={14}/></button>}
@@ -562,7 +571,9 @@
                             </div>
                         </div>
                     </div>
-                    {error && <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-red-500/90 text-white px-6 py-3 rounded-full text-sm font-medium shadow-xl animate-in slide-in-from-top-4 fade-in z-50 flex items-center gap-2"><MinusCircle size={16}/> {error}</div>}
+                    {error && <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-red-500/90 text-white px-6 py-3 rounded-full text-sm font-medium shadow-xl animate-in slide-in-from-top-4 fade-in z-50 flex items-center gap-2">
+                        <AlertTriangle size={16}/> {error} {/* Changed Icon to AlertTriangle */}
+                    </div>}
                 </div>
             );
         }
