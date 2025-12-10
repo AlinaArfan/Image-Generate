@@ -120,7 +120,7 @@
 
         function TikTokAffiliateStudio() {
             // STATE
-            const [apiKey, setApiKey] = useState(""); 
+            const [apiKey, setApiKey] = useState("AIzaSyDBnGH5LaL19SM0vAYol6brYr_LOVrqZ6w"); 
             const [showApiModal, setShowApiModal] = useState(false);
 
             const audioRef = useRef(null);
@@ -161,15 +161,14 @@
 
             // Check API Key on Load
             useEffect(() => {
-                const storedKey = localStorage.getItem("gemini_api_key");
-                // Use the hardcoded key if local storage is empty, for convenience
-                const defaultKey = "AIzaSyB4uh_lIfAETwFpyi6-5PDyOpyzgnWKldk";
-                
-                if (storedKey) {
-                    setApiKey(storedKey);
-                } else {
-                    setApiKey(defaultKey);
-                    localStorage.setItem("gemini_api_key", defaultKey);
+                if (!apiKey) {
+                    const storedKey = localStorage.getItem("gemini_api_key");
+                    if (storedKey) {
+                        setApiKey(storedKey);
+                        setShowApiModal(false);
+                    } else {
+                        setShowApiModal(true);
+                    }
                 }
             }, []);
 
@@ -178,9 +177,9 @@
                     setApiKey(key.trim());
                     localStorage.setItem("gemini_api_key", key.trim());
                     setShowApiModal(false);
-                    setError(null); // Clear error on new key
+                    setError(null);
                 } else {
-                    alert("API Key terlalu pendek!");
+                    alert("API Key tidak valid!");
                 }
             };
 
@@ -221,13 +220,8 @@
                         body: JSON.stringify({ contents: [{ parts: [{ text: "Analyze this product image briefly for sales prompt." }, { inlineData: { mimeType: "image/png", data: base64Image.split(',')[1] } }] }] })
                     });
                     const d = await res.json();
-                    if(d.error) {
-                        console.error("Analysis Error", d.error);
-                    } else if(d.candidates?.[0]?.content?.parts?.[0]?.text) {
-                        setPrompt(d.candidates[0].content.parts[0].text.trim());
-                    }
-                } catch (e) { console.log("Auto-analyze failed", e); } 
-                finally { setIsAnalyzingProduct(false); }
+                    if(d.candidates?.[0]?.content?.parts?.[0]?.text) setPrompt(d.candidates[0].content.parts[0].text.trim());
+                } catch (e) {} finally { setIsAnalyzingProduct(false); }
             };
 
             const processFile = (file, setFunction) => {
@@ -255,31 +249,6 @@
             const handleDragOver = (e, setDrag) => { e.preventDefault(); setDrag(true); };
             const handleDragLeave = (e, setDrag) => { e.preventDefault(); setDrag(false); };
             const handleDrop = (e, setDrag, setFn) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0], setFn); };
-
-            useEffect(() => {
-                const handlePaste = (e) => {
-                    const items = e.clipboardData.items;
-                    for (const item of items) {
-                        if (item.type.indexOf('image') !== -1) {
-                            const blob = item.getAsFile();
-                            const reader = new FileReader();
-                            reader.onload = (event) => {
-                                const base64 = event.target.result;
-                                if (!productImage) { setProductImage(base64); if(apiKey) analyzeProduct(base64); } 
-                                else if (referenceType !== 'Product' && !refImage) { setRefImage(base64); } 
-                                else { setProductImage(base64); if(apiKey) analyzeProduct(base64); }
-                            };
-                            reader.readAsDataURL(blob);
-                        }
-                    }
-                };
-                window.addEventListener('paste', handlePaste);
-                return () => window.removeEventListener('paste', handlePaste);
-            }, [productImage, refImage, referenceType, apiKey]);
-
-            const handleAudioPlay = () => {
-                if (audioRef.current) { if (isAudioPlaying) audioRef.current.pause(); else audioRef.current.play(); setIsAudioPlaying(!isAudioPlaying); }
-            };
 
             const handleGenerateScript = async () => {
                 if (!apiKey) { setShowApiModal(true); return; }
@@ -328,20 +297,31 @@
                         } else if (referenceType === 'Product') inst += `Place in ${artStyle} bg. `;
                         
                         const vars = [`Professional shot. ${inst}`, `Close-up. ${inst}`, `Lifestyle. ${inst}`, `Creative. ${inst}`];
+                        
+                        // FIX: Better error handling inside loop
+                        let firstError = null;
+                        
                         const fetchOne = async (ins) => {
                             try {
                                 const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [...contents.map(c=>({role:"user",parts:[c]})), {role:"user",parts:[{text:`${ins} ${affiliatePrompt}`}]}], generationConfig: { responseModalities: ["TEXT", "IMAGE"] } }) });
                                 const d = await r.json();
                                 if(d.error) {
-                                    console.error("Gemini Error", d.error);
+                                    console.error("Gemini Error:", d.error);
+                                    if(!firstError) firstError = d.error.message;
                                     return null;
                                 }
                                 const b64 = d.candidates?.[0]?.content?.parts?.find(p=>p.inlineData)?.inlineData?.data;
                                 return b64 ? `data:image/png;base64,${b64}` : null;
-                            } catch(e) { console.error(e); return null; }
+                            } catch(e) { console.error(e); if(!firstError) firstError = e.message; return null; }
                         };
                         const res = await Promise.all(vars.map(v => fetchOne(v)));
                         newImages = res.filter(i => i !== null);
+                        
+                        // If all failed, throw the first error we caught
+                        if(newImages.length === 0 && firstError) {
+                            throw new Error(firstError);
+                        }
+
                     } else {
                         const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instances: [{ prompt: affiliatePrompt }], parameters: { sampleCount: 4, aspectRatio } }) });
                         const d = await r.json();
@@ -349,7 +329,7 @@
                         if (d.predictions) newImages = d.predictions.map(p => `data:image/png;base64,${p.bytesBase64Encoded}`);
                     }
                     if (newImages.length > 0) { setGeneratedBatch(newImages); setGeneratedImage(newImages[0]); if (!generatedScript) handleGenerateScript(); } 
-                    else throw new Error("Gagal generate. API menolak permintaan atau Key salah.");
+                    else throw new Error("Gagal generate. Periksa kuota/limit API Key.");
                 } catch (err) { setError(err.message || "Gagal generate gambar."); } finally { setIsGeneratingImg(false); }
             };
 
@@ -374,6 +354,11 @@
 
             const handleDownload = () => {
                 const link = document.createElement('a'); link.href = generatedImage; link.download = `tiktok_${Date.now()}.png`; document.body.appendChild(link); link.click(); document.body.removeChild(link);
+            };
+
+            // Audio Handler
+            const handleAudioPlay = () => {
+                if (audioRef.current) { if (isAudioPlaying) audioRef.current.pause(); else audioRef.current.play(); setIsAudioPlaying(!isAudioPlaying); }
             };
 
             return (
@@ -487,7 +472,7 @@
                                         <div className="space-y-2">
                                             <div className="flex justify-between items-center"><label className="text-xs font-bold text-zinc-500 uppercase">1. Mode Referensi</label><div className="flex gap-1">{refTypes.map(t => (<button key={t.id} onClick={() => setReferenceType(t.id)} title={t.label} className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold border transition-all ${referenceType === t.id ? 'bg-[#00f2ea]/20 border-[#00f2ea] text-[#00f2ea]' : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>{renderRefIcon(t.id)} {t.label}</button>))}</div></div>
                                             
-                                            {/* PRODUCT UPLOAD */}
+                                            {/* PRODUCT UPLOAD (CLEAN) */}
                                             <div className={`relative transition-all ${isDraggingProduct ? 'scale-[1.02] ring-2 ring-[#00f2ea]' : ''}`} onDragOver={(e) => handleDragOver(e, setIsDraggingProduct)} onDragLeave={(e) => handleDragLeave(e, setIsDraggingProduct)} onDrop={(e) => handleDrop(e, setIsDraggingProduct, setProductImage)}>
                                                 <label htmlFor="product-upload" className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl transition-all cursor-pointer group bg-zinc-900 overflow-hidden ${isDraggingProduct ? 'border-[#00f2ea] bg-zinc-800' : 'border-zinc-700 hover:border-[#00f2ea] hover:bg-zinc-900/50'}`}>
                                                     {productImage ? (
@@ -500,7 +485,7 @@
                                                 {productImage && <button onClick={() => {setProductImage(null); setGeneratedImage(null);}} className="absolute top-2 right-2 bg-black/60 hover:bg-red-500/90 backdrop-blur-md rounded-full p-1.5 text-white transition-colors z-10 border border-white/10"><Trash2 size={14}/></button>}
                                             </div>
 
-                                            {/* REF UPLOAD */}
+                                            {/* REF UPLOAD (CLEAN) */}
                                             {referenceType !== 'Product' && (
                                                 <div className={`relative mt-2 animate-in slide-in-from-right-4 fade-in transition-all ${isDraggingRef ? 'scale-[1.02] ring-2 ring-[#ff0050]' : ''}`} onDragOver={(e) => handleDragOver(e, setIsDraggingRef)} onDragLeave={(e) => handleDragLeave(e, setIsDraggingRef)} onDrop={(e) => handleDrop(e, setIsDraggingRef, setRefImage)}>
                                                     <div className="absolute left-1/2 -top-3 -translate-x-1/2 z-10 bg-zinc-950 p-1 rounded-full border border-zinc-800 shadow-sm"><Plus size={12} className="text-zinc-500"/></div>
@@ -572,7 +557,7 @@
                         </div>
                     </div>
                     {error && <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-red-500/90 text-white px-6 py-3 rounded-full text-sm font-medium shadow-xl animate-in slide-in-from-top-4 fade-in z-50 flex items-center gap-2">
-                        <AlertTriangle size={16}/> {error} {/* Changed Icon to AlertTriangle */}
+                        <AlertTriangle size={16}/> {error} 
                     </div>}
                 </div>
             );
